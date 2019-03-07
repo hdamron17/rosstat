@@ -1,0 +1,13 @@
+<package format="2">
+  <name>rosstat</name>
+  <version>0.0.1</version>
+  <description>Reports system usage by ROS nodes.</description>
+  <maintainer email="hdamron@email.sc.edu">Hunter Damron</maintainer>
+  <license>BSD</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <depend>std_msgs</depend>
+  <build_depend>message_generation</build_depend>
+  <exec_depend>message_runtime</exec_depend>
+  <exec_depend>rospy</exec_depend>
+</package>
