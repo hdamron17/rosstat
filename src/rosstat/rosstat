@@ -42,6 +42,7 @@ class SystemStatus:
                 "mem_percent": p.memory_percent()
             }
         except:
+            sys.stderr.write("Unable to stat node with pid %d\n" % pid)
             return None
 
     def nodePids(self):
@@ -53,8 +54,10 @@ class SystemStatus:
 
     def getPid(self, node_name):
         try:
-            return rosnode._succeed(xmlrpclib.ServerProxy(self.master.lookupNode(node_name)).getPid())
-        except:
+            return rosnode._succeed(xmlrpclib.ServerProxy(self.master.lookupNode(node_name)).getPid(rospy.names.get_name()))
+        except Exception as e:
+            sys.stderr.write("Unable to get pid of node '%s'\n" % node_name)
+            sys.stderr.write(str(e) + '\n')
             return None
 
 class SystemStatusNode:
@@ -80,7 +83,8 @@ class SystemStatusNode:
         msg.header.stamp = rospy.Time.now()
         msg.cpu_percent = status.get("cpu_percent", 0.0)
         msg.mem_percent = status.get("mem_percent", 0.0)
-        for node, stat in status.get("nodes", {}).items():
+        sortednodes = sorted(status.get("nodes", {}).items(), key=lambda m: m[1].get("cpu_percent", 0.0), reverse=True)
+        for node, stat in sortednodes:
             pmsg = ProcessStatus()
             pmsg.name = node
             pmsg.pid = stat.get("pid", -1)
@@ -96,11 +100,11 @@ def main():
     parser.add_argument(dest='topic', nargs='?', help='topic on which to publish status')
     parser.set_defaults(immmediate=True, delay=2, topic="~status")
 
-    args = parser.parse_args()
+    args = parser.parse_args(rospy.myargv()[1:])
+    rospy.init_node("rosstat")
     if args.immediate:
         pprint(SystemStatus().fullReport())
     else:
-        rospy.init_node("rosstat")
         SystemStatusNode(args.topic, args.delay).run()
 
 if __name__ == "__main__":
