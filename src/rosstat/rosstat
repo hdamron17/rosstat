@@ -1,7 +1,107 @@
-from systemstatus import SystemStatus
+#! /usr/bin/env python2
+
+import rospy
+import rosnode
+import rosgraph
+import xmlrpclib
+import psutil
+import argparse
+import json
+import sys
+from rosstat.msg import SystemStatus as SystemStatusMsg, ProcessStatus
+
+def pprint(d):
+    print(json.dumps(d, indent=4))
+
+default_delay = 0.2
+class SystemStatus:
+    def __init__(self):
+        self.master = rosgraph.Master("")
+
+    def fullReport(self, delay=default_delay):
+        mem = psutil.virtual_memory()
+        return {
+            "cpu_percent": psutil.cpu_percent(delay),
+            "mem_percent": 100. * mem.used / mem.total,
+            "nodes": self.allNodesStat()
+        }
+
+    def allNodesStat(self, **kw):
+        allstat = {name: self.pidStat(pid) for name, pid in self.nodePids().items()}
+        return {k: v for k, v in allstat.items() if v is not None}
+
+    def nodeStat(self, node_name, **kw):
+        return self.pidStat(self.getPid(node_name), **kw)
+
+    def pidStat(self, pid, delay=default_delay):
+        try:
+            p = psutil.Process(pid)
+            return {
+                "pid": pid,
+                "cpu_percent": p.cpu_percent(delay) / psutil.cpu_count(),
+                "mem_percent": p.memory_percent()
+            }
+        except:
+            return None
+
+    def nodePids(self):
+        names = self.nodeNames()
+        return dict(filter(lambda x: x[1] is not None, zip(names, map(self.getPid, names))))
+
+    def nodeNames(self):
+        return rosnode.get_node_names()
+
+    def getPid(self, node_name):
+        try:
+            return rosnode._succeed(xmlrpclib.ServerProxy(self.master.lookupNode(node_name)).getPid())
+        except:
+            return None
+
+class SystemStatusNode:
+    def __init__(self, topic, loop_time=1):
+        self.status = SystemStatus()
+        self.pub = rospy.Publisher(topic, SystemStatusMsg, queue_size=1)
+        self.d = rospy.Duration(loop_time)
+
+    def run(self):
+        prevtime = rospy.Time(0)
+        while not rospy.is_shutdown():
+            timeleft = self.d - (rospy.Time.now() - prevtime)
+            if timeleft > rospy.Duration(0):
+                rospy.sleep(timeleft)
+            self.report()
+            prevtime = rospy.Time.now()
+
+    def report(self):
+        self.pub.publish(self.statusJson2Msg(self.status.fullReport()))
+
+    def statusJson2Msg(self, status):
+        msg = SystemStatusMsg()
+        msg.header.stamp = rospy.Time.now()
+        msg.cpu_percent = status.get("cpu_percent", 0.0)
+        msg.mem_percent = status.get("mem_percent", 0.0)
+        for node, stat in status.get("nodes", {}).items():
+            pmsg = ProcessStatus()
+            pmsg.name = node
+            pmsg.pid = stat.get("pid", -1)
+            pmsg.cpu_percent = stat.get("cpu_percent", 0.0)
+            pmsg.mem_percent = stat.get("mem_percent", 0.0)
+            msg.nodes.append(pmsg)
+        return msg
 
 def main():
-    pass
+    parser = argparse.ArgumentParser(description='Process some integers.')
+    parser.add_argument('-i', '--immediate', dest='immediate', action='store_true', help='print immediately rather than publishing')
+    parser.add_argument('-d', '--delay', dest='delay', type=float, nargs='?', help='delay between iterations')
+    parser.add_argument(dest='topic', nargs='?', help='topic on which to publish status')
+    parser.set_defaults(immmediate=True, delay=2, topic="~status")
+
+    args = parser.parse_args()
+    if args.immediate:
+        pprint(SystemStatus().fullReport())
+    else:
+        rospy.init_node("rosstat")
+        SystemStatusNode(args.topic, args.delay).run()
 
 if __name__ == "__main__":
     main()
